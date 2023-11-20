@@ -1118,19 +1118,16 @@ static int hls_append_segment(struct AVFormatContext *s, HLSContext *hls,
     const char  *filename;
     int byterange_mode = (hls->flags & HLS_SINGLE_FILE) || (hls->max_seg_size > 0);
     int ret;
+    if (!en) return AVERROR(ENOMEM);
 
-    if (!en)
-        return AVERROR(ENOMEM);
-
+    // Make file name
     en->var_stream_idx = vs->var_stream_idx;
     ret = sls_flags_filename_process(s, hls, vs, en, duration, pos, size);
     if (ret < 0) {
         av_freep(&en);
         return ret;
     }
-
     filename = av_basename(vs->avf->url);
-
     if (hls->use_localtime_mkdir) {
         filename = vs->avf->url;
     }
@@ -1140,11 +1137,11 @@ static int hls_append_segment(struct AVFormatContext *s, HLSContext *hls,
     }
     av_strlcpy(en->filename, filename, sizeof(en->filename));
 
-    if (vs->has_subtitle)
-        av_strlcpy(en->sub_filename, av_basename(vs->vtt_avf->url), sizeof(en->sub_filename));
-    else
-        en->sub_filename[0] = '\0';
-
+    // Add subfile name
+    if (vs->has_subtitle) av_strlcpy(en->sub_filename, av_basename(vs->vtt_avf->url), sizeof(en->sub_filename));
+    else en->sub_filename[0] = '\0';
+    
+    // Construct segment struct
     en->duration = duration;
     en->pos      = pos;
     en->size     = size;
@@ -1154,27 +1151,29 @@ static int hls_append_segment(struct AVFormatContext *s, HLSContext *hls,
     en->discont  = 0;
     en->discont_program_date_time = 0;
 
+    // process discontinuity
     if (vs->discontinuity) {
         en->discont = 1;
         vs->discontinuity = 0;
     }
-
+    
+    // Add key info
     if (hls->key_info_file || hls->encrypt) {
         av_strlcpy(en->key_uri, vs->key_uri, sizeof(en->key_uri));
         av_strlcpy(en->iv_string, vs->iv_string, sizeof(en->iv_string));
     }
 
-    if (!vs->segments)
-        vs->segments = en;
-    else
-        vs->last_segment->next = en;
-
+    // Add segment to stream
+    if (!vs->segments) vs->segments = en;
+    else vs->last_segment->next = en;
     vs->last_segment = en;
+    av_log(s, AV_LOG_INFO, "adding to opaque: %ld\n", pos);
+    s->opaque = vs->segments;
 
     // EVENT or VOD playlists imply sliding window cannot be used
-    if (hls->pl_type != PLAYLIST_TYPE_NONE)
-        hls->max_nb_segments = 0;
+    if (hls->pl_type != PLAYLIST_TYPE_NONE) hls->max_nb_segments = 0;
 
+    // Process list limits
     if (hls->max_nb_segments && vs->nb_entries >= hls->max_nb_segments) {
         en = vs->segments;
         if (!en->next->discont_program_date_time && !en->discont_program_date_time)
@@ -1188,12 +1187,10 @@ static int hls_append_segment(struct AVFormatContext *s, HLSContext *hls,
                 return ret;
         } else
             av_freep(&en);
-    } else
-        vs->nb_entries++;
+    } else vs->nb_entries++;
 
-    if (hls->max_seg_size > 0) {
-        return 0;
-    }
+    // Don't know
+    if (hls->max_seg_size > 0) return 0;
     vs->sequence++;
 
     return 0;
@@ -2613,6 +2610,7 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
         if (vs->start_pos || hls->segment_type != SEGMENT_TYPE_FMP4) {
             double cur_duration =  (double)(pkt->pts - vs->end_pts) * st->time_base.num / st->time_base.den;
             ret = hls_append_segment(s, hls, vs, cur_duration, vs->start_pos, vs->size);
+            av_log(s, AV_LOG_INFO, "writing a new segment with duration: %f \n", cur_duration);
             vs->end_pts = pkt->pts;
             vs->duration = 0;
             if (ret < 0) {
