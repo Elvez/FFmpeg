@@ -178,7 +178,7 @@ int ff_rtsp_tcp_write_packet(AVFormatContext *s, RTSPStream *rtsp_st)
     return ffio_open_dyn_packet_buf(&rtpctx->pb, rt->pkt_size);
 }
 
-static int rtsp_write_packet(AVFormatContext *s, AVPacket *pkt)
+static int rtsp_write_packet_jarvis(AVFormatContext *s, AVPacket *pkt)
 {
     RTSPState *rt = s->priv_data;
     RTSPStream *rtsp_st;
@@ -225,6 +225,21 @@ static int rtsp_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (!ret && rt->lower_transport == RTSP_LOWER_TRANSPORT_TCP)
         ret = ff_rtsp_tcp_write_packet(s, rtsp_st);
     return ret;
+}
+
+static int rtsp_write_packet(AVFormatContext *s, AVPacket *pkt) {
+    int ret = rtsp_write_packet_jarvis(s, pkt);
+    if (ret == AVERROR(EPIPE)) {
+        av_log(s, AV_LOG_WARNING, "Broken pipe, retrying ...");
+        ret = ff_rtsp_connect(s);
+        if (ret != 0) {
+            av_log(s, AV_LOG_ERROR, "Error while connecting rtsp");
+            return ret;
+        }
+        ret = rtsp_write_packet_jarvis(s, pkt);
+        if (ret != 0) return ret;
+        else return ret;
+    } else return ret;
 }
 
 static int rtsp_write_close(AVFormatContext *s)

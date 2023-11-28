@@ -1191,6 +1191,8 @@ static int hls_append_segment(struct AVFormatContext *s, HLSContext *hls,
     } else
         vs->nb_entries++;
 
+    av_log(hls, AV_LOG_INFO, "updaing opaque -> segments");
+    s->opaque = vs->segments;
     if (hls->max_seg_size > 0) {
         return 0;
     }
